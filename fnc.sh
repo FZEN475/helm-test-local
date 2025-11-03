@@ -56,6 +56,85 @@
     fi
   }
 
+  function tbc_envsubst() {
+    awk '
+      BEGIN {
+        count_replaced_lines = 0
+        # ASCII codes
+        for (i=0; i<=255; i++)
+          char2code[sprintf("%c", i)] = i
+      }
+      # determine encoding (from env or from file extension)
+      function encoding() {
+        enc = ENVIRON["TBC_ENVSUBST_ENCODING"]
+        if (enc != "")
+          return enc
+        if (match(FILENAME, /\.(json|yaml|yml)$/))
+          return "jsonstr"
+        return "raw"
+      }
+      # see: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent
+      function uriencode(str) {
+        len = length(str)
+        enc = ""
+        for (i=1; i<=len; i++) {
+          c = substr(str, i, 1);
+          if (index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!~*'\''()", c))
+            enc = enc c
+          else
+            enc = enc "%" sprintf("%02X", char2code[c])
+        }
+        return enc
+      }
+      /# *nosubst/ {
+        print $0
+        next
+      }
+      {
+        orig_line = $0
+        line = $0
+        count_repl_in_line = 0
+        # /!\ 3rd arg (match) not supported in BusyBox awk
+        while (match(line, /[$%]\{([[:alnum:]_]+)\}/)) {
+          expr_start = RSTART
+          expr_len = RLENGTH
+          # get var name
+          var = substr(line, expr_start+2, expr_len-3)
+          # get var value (from env)
+          val = ENVIRON[var]
+          # check variable is set
+          if (val == "") {
+            printf("[\033[1;93mWARN\033[0m] Environment variable \033[33;1m%s\033[0m is not set or empty\n", var) > "/dev/stderr"
+          } else {
+            enc = encoding()
+            if (enc == "jsonstr") {
+              gsub(/["\\]/, "\\\\&", val)
+              gsub("\n", "\\n", val)
+              gsub("\r", "\\r", val)
+              gsub("\t", "\\t", val)
+            } else if (enc == "uricomp") {
+              val = uriencode(val)
+            } else if (enc == "raw") {
+            } else {
+              printf("[\033[1;93mWARN\033[0m] Unsupported encoding \033[33;1m%s\033[0m: ignored\n", enc) > "/dev/stderr"
+            }
+          }
+          # replace expression in line
+          line = substr(line, 1, expr_start - 1) val substr(line, expr_start + expr_len)
+          count_repl_in_line++
+        }
+        if (count_repl_in_line) {
+          if (count_replaced_lines == 0)
+            printf("[\033[1;94mINFO\033[0m] Variable expansion occurred in file \033[33;1m%s\033[0m:\n", FILENAME) > "/dev/stderr"
+          count_replaced_lines++
+          printf("> line %s: %s\n", NR, orig_line) > "/dev/stderr"
+        }
+        print line
+      }
+    ' "$@"
+  }
+
+
   function add_helm_repositories() {
     if [[ -z "$HELM_REPOS" ]]
     then
