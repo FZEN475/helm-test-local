@@ -1,0 +1,44 @@
+services:
+  ansible:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: ./.env
+    environment:
+      TRACE: false
+      CUSTOM_CA_CERTS: "/tmp/ca.crt"
+      KUBECONFIG: "/root/.kube/config"
+
+      HELM_REPOS: "extra_chart_1@oci://gitlab-registry.gitlab.svc:5000/library/helm/charts " # "extra_chart_1@oci:// extra_chart_2@oci://"
+      HELM_REPO_EXTRA_CHART_1_USER: ${HELM_REPO_EXTRA_CHART_1_USER}
+      HELM_REPO_EXTRA_CHART_1_PASSWORD: ${HELM_REPO_EXTRA_CHART_1_PASSWORD}
+      HELM_REPO_EXTRA_CHART_2_USER: ${HELM_REPO_EXTRA_CHART_2_USER}
+      HELM_REPO_EXTRA_CHART_2_PASSWORD: ${HELM_REPO_EXTRA_CHART_2_PASSWORD}
+      
+      # helm $ENV_VALUES $HELM_COMMON_VALUES $ENV_NAMESPACE $HELM_DEPLOY_ARGS $ENV_APP_NAME $HELM_DEPLOY_CHART
+      ENV_VALUES: ""
+      ENV_NAMESPACE: "dev"
+      ENV_APP_NAME: "dev-image-helm-example"
+      HELM_DEPLOY_CHART: "./chart/" # ./chart/ или gitlab/gitlab
+      
+      DELETE_HELM: true
+      HELM_DELETE_ARGS: ""
+
+      INSTALL_HELM: true
+      HELM_DEPLOY_ARGS: '--set-string global.labels.example=false --set global.labels.example_1=enable'
+    volumes:
+      - /tmp/helm:/source
+    secrets:
+      - source: kubeconfig
+        target: /root/.kube/config
+        mode: 0600
+      - source: ca.crt
+        target: /tmp/ca.crt
+        mode: 0600
+      
+
+secrets:
+  kubeconfig:
+    file: /root/.kube/config
+  ca.crt:
+    file: /etc/ssl/certs/ca.crt

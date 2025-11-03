@@ -1,0 +1,54 @@
+include:
+  - component: $CI_SERVER_FQDN/library/ci/build-docker-image@main
+    inputs:
+      # Тесты
+      hadolint-disabled: false
+      sbom-disabled: false
+      trivy-disabled: false
+
+      # Дополнительные тэги
+      semrel-release-disabled: false
+      release-extra-tags: latest \g<major>.\g<minor> \g<major>
+      
+      prod-publish-strategy: none
+      
+  - component: $CI_SERVER_FQDN/library/ci/auto-gitlab@main
+    inputs:
+      
+      # Объединение веток
+      auto-merge: true
+      auto-rebase: true
+      auto-approve: true
+      auto-remove-source-branch: true
+
+      # Создание тега при коммите в защищенную ветку
+      auto-tag: true
+      auto-tag-pattern: '/^\d+\.\d+\.\d+$/'
+      auto-tag-version-major: 0
+      auto-tag-version-minor: 4
+
+      # Создание релиза из тэга
+      auto-release: true
+
+stages:
+  - build
+  - test
+  - package-build
+  - package-test
+  - infra
+  - deploy
+  - acceptance
+  - publish
+  - infra-prod
+  - production
+  - auto-merge
+  - auto-release
+
+variables:
+  CI_DEBUG_TRACE: "false"
+  CUSTOM_CA_CERTS: "$CI_SERVER_TLS_CA_FILE"
+  DOCKER_FILE: "Dockerfile"
+  DOCKER_SNAPSHOT_IMAGE: "$CI_REGISTRY_IMAGE/helm-test-local:$CI_COMMIT_REF_SLUG"
+  DOCKER_RELEASE_IMAGE: "$CI_REGISTRY_IMAGE/helm-test-local:$CI_COMMIT_REF_NAME"
+
+

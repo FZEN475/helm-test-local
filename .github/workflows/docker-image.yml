@@ -1,0 +1,62 @@
+name: Docker Image CI!
+
+on:
+  push:
+    tags:
+      - '[0-9]+\.[0-9]+\.[0-9]+'
+      - '[Vv][0-9]+\.[0-9]+\.[0-9]+'
+
+jobs:
+
+
+  pull-image:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERFILE_PATH: ./Dockerfile   # <-- здесь указываешь путь к Dockerfile
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Login to GitHub Container Registry'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+      - id: lower-repo
+        shell: bash
+        run: echo "repository=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - id: extract
+        shell: bash
+        run: |
+          echo "dir=$(dirname '${{ env.DOCKERFILE_PATH }}')" >> "$GITHUB_OUTPUT"
+          echo "file=$(basename '${{ env.DOCKERFILE_PATH }}')" >> "$GITHUB_OUTPUT"
+      - name: Build, push and sign image
+        uses: docker/build-push-action@v3
+        with:
+          context: ${{ steps.extract.outputs.dir }}
+          dockerfile: ${{ steps.extract.outputs.file }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.lower-repo.outputs.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ steps.lower-repo.outputs.repository }}:latest
+          sign: true
+          signing-key: ${{ secrets.SIGNING_KEY }}
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Docker image for tag ${{ github.ref_name }} is now available.
+            - ghcr.io/${{ steps.lower-repo.outputs.repository }}:${{ github.ref_name }}
+            - ghcr.io/${{ steps.lower-repo.outputs.repository }}:latest
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
