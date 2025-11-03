@@ -1,0 +1,50 @@
+services:
+  helm-install:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: ./.env
+    environment:
+      TRACE: true
+      CUSTOM_CA_CERTS: "/tmp/ca.crt"
+      KUBECONFIG: "/root/.kube/config"
+
+      HELM_REPOS: "helm-library@oci://gitlab-registry.gitlab.svc:5000/library/helm/charts " # "extra_chart_1@oci:// extra_chart_2@oci://"
+      HELM_REPO_HELM_LIBRARY_USER: ${HELM_REPO_HELM_LIBRARY_USER}
+      HELM_REPO_HELM_LIBRARY_PASSWORD: ${HELM_REPO_HELM_LIBRARY_PASSWORD}
+      
+      # Deploy
+      HELM_ENV_VALUE_NAME: "environmentType"
+      ENV_TYPE: "local-test"
+      HELM_HOSTNAME_VALUE_NAME: "hostname"
+      ENV_URL: "https://helm-chart-example-ci.example.ru/"
+      
+      HELM_DEPLOY_CHART: "./chart/" # ./chart/ или gitlab/gitlab
+      ENV_APP_NAME: "dev-image-helm-example"
+      ENV_NAMESPACE: "dev"
+      ENV_VALUES: ""
+      
+      HELM_SCRIPTS_DIR: "./chart/hooks/"
+
+      DELETE_HELM: true
+      HELM_DELETE_ARGS: 'uninstall'
+      
+      INSTALL_HELM: true
+      HELM_DEPLOY_ARGS: 'upgrade --install --atomic --timeout 120s --set-string global.labels.example=false --set global.labels.example_1=enable'
+
+    volumes:
+      - /tmp/helm-install:/source
+    secrets:
+      - source: kubeconfig
+        target: /root/.kube/config
+        mode: 0600
+      - source: ca.crt
+        target: /tmp/ca.crt
+        mode: 0600
+      
+
+secrets:
+  kubeconfig:
+    file: /root/.kube/config
+  ca.crt:
+    file: /etc/ssl/certs/ca.crt

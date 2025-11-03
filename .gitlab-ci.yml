@@ -1,0 +1,250 @@
+include:
+  - component: $CI_SERVER_FQDN/library/to-be-continuous/Docker/gitlab-ci-docker@master
+    inputs:
+      # Тесты
+      build-tool: buildah
+      build-args: "--format=docker"
+      config-file: "/tmp/config.json"
+      
+      prod-publish-strategy: auto
+      
+      release-extra-tags: latest \g<major>.\g<minor> \g<major>
+      semrel-release-disabled: true
+      
+      cosign-strategy: always
+      cosign-dist-url: "https://github.com/sigstore/cosign/releases/download/v2.5.0/cosign-linux-amd64"
+      
+  - component: $CI_SERVER_FQDN/library/cicd/auto-release/auto-release@main
+    inputs:
+      auto-rebase: true
+      auto-approve: true
+
+      auto-merge: true
+      auto-remove-source-branch: true
+
+      auto-tag: false
+      auto-tag-pattern: '/^\d+\.\d+\.\d+$/'
+      auto-tag-version-major: 0
+      auto-tag-version-minor: 4
+
+      auto-release: true
+
+stages:
+  - build                                # docker-hadolint,
+  - package-build                        # docker-kaniko-build, docker-dind-build, docker-buildah-build
+  - package-test                         # docker-healthcheck, docker-trivy, docker-sbom
+  - publish                              # docker-publish
+
+  - auto-merge
+  - auto-tag
+  - auto-release
+
+.docker-base:
+  services:
+    - name: "$TBC_TRACKING_IMAGE"
+      command: ["--service", "docker", "8.0.10"]
+  before_script:
+    - !reference [.docker-scripts]
+  tags:
+    - docker-builder
+
+.auto-rebase-needs:
+  - job: docker-hadolint
+    optional: true
+  - job: docker-buildah-build
+    optional: true
+  - job: docker-healthcheck
+    optional: true
+  - job: docker-sbom
+    optional: true
+  - job: docker-trivy
+    optional: true
+  - job: docker-publish
+
+.auto-approve-needs:
+  - job: docker-hadolint
+    optional: true
+  - job: docker-buildah-build
+    optional: true
+  - job: docker-healthcheck
+    optional: true
+  - job: docker-sbom
+    optional: true
+  - job: docker-trivy
+    optional: true
+  - job: docker-publish
+
+.auto-merge-needs:
+  - job: docker-hadolint
+    optional: true
+  - job: docker-buildah-build
+    optional: true
+  - job: docker-healthcheck
+    optional: true
+  - job: docker-sbom
+    optional: true
+  - job: docker-trivy
+    optional: true
+  - job: docker-publish
+
+.auto-create-TAG-needs:
+  - job: docker-hadolint
+    optional: true
+  - job: docker-buildah-build
+    optional: true
+  - job: docker-healthcheck
+    optional: true
+  - job: docker-sbom
+    optional: true
+  - job: docker-trivy
+    optional: true
+  - job: docker-publish
+
+.auto-release-needs:
+  - job: docker-hadolint
+    optional: true
+  - job: generate_release_env_file
+  - job: docker-buildah-build
+    optional: true
+  - job: docker-healthcheck
+    optional: true
+  - job: docker-sbom
+    optional: true
+  - job: docker-trivy
+    optional: true
+  - job: docker-publish
+  - job: docker-buildah-mirroring
+    optional: true
+
+generate_release_env_file:
+  stage: publish
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  needs:
+    - job: docker-publish
+  before_script:
+    - !reference [ .install-utility ]
+  script:
+    - |
+      arg_image=$(printf '```bash\ndocker pull %s:%s\n```\n' \
+        "$CI_REGISTRY_IMAGE" "$docker_tag")
+
+      log_info "$arg_image"
+      
+      arg_latest=$(printf '```bash\ndocker pull %s:%s\n```\n---\n' \
+        "$CI_REGISTRY_IMAGE" "latest")
+      
+      log_info "$arg_latest"
+      
+      # Формируем release notes для образа docker
+      release_notes_docker=$(jq -n \
+        --arg head "Docker image" \
+        --arg image "$arg_image" \
+        --arg latest "$arg_latest" \
+        '{head: $head, image: $image, latest: $latest}' | base64 -w0
+      )
+
+      {
+        echo "release_notes_docker=$release_notes_docker"
+      } > release.env
+
+  rules:
+    - !reference [ .tagged, only ]
+    - when: on_success
+  artifacts:
+    reports:
+      dotenv: release.env
+
+docker-buildah-mirroring:
+  extends: .docker-base
+  image:
+    name: "$DOCKER_SKOPEO_IMAGE"
+    entrypoint: [""]
+  stage: publish
+  needs:
+    - job: docker-publish
+  cache:
+    - key: "$CI_COMMIT_REF_SLUG-docker"
+      paths:
+        - .cache
+  script:
+    - |
+      log_info "Skopeo version:"
+      skopeo -v
+    - BUILDTOOL_HOME=${BUILDTOOL_HOME:-$HOME}
+    - log_info "Copying ${DOCKER_RELEASE_IMAGE} to ${DOCKER_MIRROR_REPO}..."
+    - skopeo copy ${TRACE+--debug} --all --src-authfile "$BUILDTOOL_HOME/skopeo/.docker/src-config.json" --dest-authfile "$BUILDTOOL_HOME/skopeo/.docker/dest-config.json" ${DOCKER_PUBLISH_ARGS} "docker://$DOCKER_RELEASE_IMAGE" "docker://$DOCKER_MIRROR_REPO:$docker_tag" | tee skopeo-copy.log
+    - |
+      if [[ -z "$DOCKER_RELEASE_EXTRA_TAGS" ]]
+      then
+        return
+      fi
+      # check if tag matches pattern
+      maybe_install_python3
+      # shellcheck disable=SC2154
+      matches=$(python3 -c "import re;print('match' if re.match(r'$DOCKER_RELEASE_EXTRA_TAGS_PATTERN', '$docker_tag') else '')")
+      if [[ "$matches" ]]
+      then
+        # apply extra tags substitution
+        extra_tags=$(python3 -c "import re;print(re.sub(r'$DOCKER_RELEASE_EXTRA_TAGS_PATTERN', r'$DOCKER_RELEASE_EXTRA_TAGS', '$docker_tag'))")
+        log_info "Pushing extra tags (evaluated from original tag \\e[33;1m${docker_tag}\\e[0m)..."
+        for extra_tag in $extra_tags
+        do
+          log_info "... pushing extra tag: \\e[33;1m${extra_tag}\\e[0m..."
+          # shellcheck disable=SC2086,SC2154
+          skopeo copy ${TRACE+--debug} --all --src-authfile "$BUILDTOOL_HOME/skopeo/.docker/dest-config.json" --dest-authfile "$BUILDTOOL_HOME/skopeo/.docker/dest-config.json" ${DOCKER_PUBLISH_ARGS} "docker://$DOCKER_RELEASE_IMAGE" "docker://$DOCKER_MIRROR_REPO:$extra_tag"
+        done
+      else
+        log_info "Extra tags configured, but the released tag (\\e[33;1m${docker_tag}\\e[0m) doesn't match \$DOCKER_RELEASE_EXTRA_TAGS_PATTERN..."
+      fi
+      
+      log_info "Copy .sig and .att"
+      release_repository=${DOCKER_RELEASE_IMAGE%:*}
+      log_info "$release_repository"
+      docker_digest=$(skopeo inspect ${TRACE+--debug} --authfile "$BUILDTOOL_HOME/skopeo/.docker/src-config.json" --format='{{ .Digest }}' --no-tags "docker://$DOCKER_SNAPSHOT_IMAGE")
+      all_digests="$docker_digest"$'\n'"$(sed -nE 's|Copying image (sha256:[[:alnum:]]+).*|\1|p' skopeo-copy.log)"
+      success=0
+      while read sha; do
+        log_info "Copying image signature to ${release_repository}:${sha}.sig..."
+        skopeo copy ${TRACE+--debug} --src-authfile "$BUILDTOOL_HOME/skopeo/.docker/src-config.json" --dest-authfile "$BUILDTOOL_HOME/skopeo/.docker/dest-config.json" ${DOCKER_PUBLISH_ARGS} "docker://${release_repository}:${sha}.sig" "docker://$DOCKER_MIRROR_REPO:${sha}.sig" \
+          && success=1 \
+          || log_warn "No signature found for ${sha}"
+        log_info "Copying image attestation to ${release_repository}:${sha}.att..."
+        skopeo copy ${TRACE+--debug} --src-authfile "$BUILDTOOL_HOME/skopeo/.docker/src-config.json" --dest-authfile "$BUILDTOOL_HOME/skopeo/.docker/dest-config.json" ${DOCKER_PUBLISH_ARGS} "docker://${release_repository}:${sha}.att" "docker://$DOCKER_MIRROR_REPO:${sha}.att" \
+          && success=1 \
+          || log_warn "No attestation found for ${sha}"
+      done < <(echo "$all_digests" | tr ':' '-' | sed '/^[ \t]*$/d')
+      if [[ $success -eq 0 ]]
+      then
+        fail "No signature or attestation could be copied"
+      fi
+
+  rules:
+    - !reference [ .tagged, only ]
+    - if: '$CI_COMMIT_TAG && ($DOCKER_BUILD_TOOL == "buildah" || ($DOCKER_BUILD_TOOL == "default" && $TBC_DEFAULT_DOCKER_BUILD_TOOL == "buildah"))'
+      when: on_success
+    # on tag: if semrel info not enabled or semrel integration disabled
+    - if: '$CI_COMMIT_TAG && ($SEMREL_INFO_ON == null || $SEMREL_INFO_ON == "" || $DOCKER_SEMREL_RELEASE_DISABLED == "true")'
+    # exclude non-production branches
+    - if: '$CI_COMMIT_REF_NAME !~ $PROD_REF'
+      when: never
+    # exclude if snapshot is same as release image and semrel info not enabled or semrel integration disabled
+    - if: '$DOCKER_SNAPSHOT_IMAGE == $DOCKER_RELEASE_IMAGE && ($SEMREL_INFO_ON == null || $SEMREL_INFO_ON == "" || $DOCKER_SEMREL_RELEASE_DISABLED == "true")'
+      when: never
+    # support former variable (prevent breaking change)
+    - if: '$PUBLISH_ON_PROD == "false"'
+      when: never
+    - if: '$DOCKER_PROD_PUBLISH_STRATEGY == "manual"'
+      when: manual
+    - if: '$DOCKER_PROD_PUBLISH_STRATEGY == "auto"'
+
+variables:
+  CI_DEBUG_TRACE: "false"
+  TRACE: "false"
+  CUSTOM_CA_CERTS: "$CI_SERVER_TLS_CA_FILE"
+  DEFAULT_CA_CERTS: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+  
+  COSIGN_TLS_PATH: "/etc/ssl/cosign/"
+  COSIGN_PRIVATE_KEY: "gitlab://${CI_PROJECT_ID}"
+  COSIGN_PASSWORD: "$CI_COMMIT_REF_SLUG"
+
+  DOCKER_MIRROR_REPO: "ghcr.io/fzen475/helm-install" #repository name must be lowercase
