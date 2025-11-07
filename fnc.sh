@@ -231,7 +231,7 @@
     fi
 
     # shellcheck disable=SC2086
-    helm $helm_opts upgrade --install --atomic --timeout 120s $HELM_DEPLOY_ARGS $environment_name $_pkg
+    helm $helm_opts upgrade --install --atomic $HELM_DEPLOY_ARGS $environment_name $_pkg
 
   }
 
