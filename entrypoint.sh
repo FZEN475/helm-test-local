@@ -1,5 +1,5 @@
 #!/usr/bin/env ash
-
+python3 --version
 source /fnc.sh
 install_ca_certs "${CUSTOM_CA_CERTS}"
 add_helm_repositories
