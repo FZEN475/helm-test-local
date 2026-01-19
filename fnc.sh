@@ -191,26 +191,18 @@
 
   # Generate Helm post-renderer option if patch script exists
   helm_post_renderer() {
-    log_info "--- \$HELM_POST_RENDERER_FILE: \\e[33;1m${HELM_POST_RENDERER_FILE}\\e[0m"
     local patch_file="${HELM_POST_RENDERER_FILE}"
 
-    # Если переменная пуста, ничего не делаем
     if [ -z "$patch_file" ]; then
-      log_info "empty HELM_POST_RENDERER_FILE variable"
-      return
+        return 0  # ничего нет
     fi
 
-    # Если файл не существует — выводим ошибку
     if [ ! -f "$patch_file" ]; then
-      log_error "Post-renderer файл '$patch_file' не найден"
-      return 1
+        return 1  # файл не найден
     fi
 
-    # Делаем файл исполняемым
     chmod +x "$patch_file"
-
-    # Формируем опцию для Helm
-    echo "--post-renderer $patch_file"
+    echo "$patch_file"
   }
 
   # deploy application
@@ -254,9 +246,18 @@
         helm dependency build "$_pkg"
     fi
 
-    # Получаем опцию post-renderer
-    post_renderer_opt=$(helm_post_renderer)
-    [ -n "$post_renderer_opt" ] && log_info "--- using post-renderer: $post_renderer_opt"
+    patch_file=$(helm_post_renderer)
+    status=$?
+    if [ $status -eq 1 ]; then
+        log_error "Post-renderer файл '$HELM_POST_RENDERER_FILE' не найден"
+        exit 1
+    elif [ -n "$patch_file" ]; then
+        log_info "--- using post-renderer: $patch_file"
+        post_renderer_opt="--post-renderer $patch_file"
+    else
+        post_renderer_opt=""
+    fi
+
 
     # Deploy
     log_info "deploy: helm ${helm_opts} ${post_renderer_opt} upgrade --install --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${_pkg}"
