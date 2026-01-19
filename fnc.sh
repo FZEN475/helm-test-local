@@ -189,6 +189,37 @@
     fi
   }
 
+  helm_post_renderer() {
+    local patches wrapper
+  
+    patches="${HELM_POST_RENDERER_PATCHES}"
+  
+    # Нет патчей — ничего не добавляем
+    [ -z "${patches}" ] && return 0
+  
+    wrapper="$(mktemp)"
+    chmod +x "${wrapper}"
+  
+    {
+      echo '#!/usr/bin/env sh'
+      echo 'set -e'
+      echo 'input="$(cat)"'
+      echo 'echo "$input"'
+  
+      for patch in ${patches}; do
+        if [ ! -f "${patch}" ]; then
+          log_error "Post-renderer patch not found: ${patch}"
+          exit 1
+        fi
+  
+        chmod +x "${patch}"
+        echo "| \"${patch}\""
+      done
+    } > "${wrapper}"
+  
+    echo "--post-renderer ${wrapper}"
+  }
+
   # deploy application
   function helm_deploy() {
     export environment_name=${ENV_APP_NAME}
@@ -229,6 +260,9 @@
         log_info "Chart.yaml found, dependency build..."
         helm dependency build "$_pkg"
     fi
+
+    post_renderer_opts="$(helm_post_renderer)"
+    helm_opts="${helm_opts} ${post_renderer_opts}"
 
     # shellcheck disable=SC2086
     helm $helm_opts upgrade --install --atomic $HELM_DEPLOY_ARGS $environment_name $_pkg
