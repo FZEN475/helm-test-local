@@ -189,35 +189,20 @@
     fi
   }
 
+  # Generate Helm post-renderer option if patch script exists
   helm_post_renderer() {
-    local patches wrapper
-  
-    patches="${HELM_POST_RENDERER_PATCHES}"
-  
-    # Нет патчей — ничего не добавляем
-    [ -z "${patches}" ] && return 0
-  
-    wrapper="$(mktemp)"
-    chmod +x "${wrapper}"
-  
-    {
-      echo '#!/usr/bin/env sh'
-      echo 'set -e'
-      echo 'input="$(cat)"'
-      echo 'echo "$input"'
-  
-      for patch in ${patches}; do
-        if [ ! -f "${patch}" ]; then
-          log_error "Post-renderer patch not found: ${patch}"
-          exit 1
-        fi
-  
-        chmod +x "${patch}"
-        echo "| \"${patch}\""
-      done
-    } > "${wrapper}"
-  
-    echo "--post-renderer ${wrapper}"
+    local patch_file="${HELM_POST_RENDERER_FILE}"
+
+    # Если переменная пуста или файл не существует, ничего не добавляем
+    if [ -z "$patch_file" ] || [ ! -f "$patch_file" ]; then
+      return
+    fi
+
+    # Делаем файл исполняемым
+    chmod +x "$patch_file"
+
+    # Формируем опцию для Helm
+    echo "--post-renderer $patch_file"
   }
 
   # deploy application
@@ -261,11 +246,19 @@
         helm dependency build "$_pkg"
     fi
 
-    post_renderer_opts="$(helm_post_renderer)"
-    helm_opts="${helm_opts} ${post_renderer_opts}"
+    # Получаем опцию post-renderer
+    post_renderer_opt=$(helm_post_renderer)
+    [ -n "$post_renderer_opt" ] && log_info "--- using post-renderer: $post_renderer_opt"
 
+    # Deploy
     # shellcheck disable=SC2086
-    helm $helm_opts upgrade --install --atomic $HELM_DEPLOY_ARGS $environment_name $_pkg
+    helm ${helm_opts} upgrade \
+      --install \
+      --atomic \
+      ${HELM_DEPLOY_ARGS} \
+      "${post_renderer_opt}" \
+      "${environment_name}" \
+      "${pkg}"
 
   }
 
