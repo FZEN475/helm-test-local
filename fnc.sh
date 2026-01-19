@@ -191,18 +191,24 @@
 
   # Generate Helm post-renderer option if patch script exists
   helm_post_renderer() {
-    local patch_file="${HELM_POST_RENDERER_FILE}"
+      local patch_file="${HELM_POST_RENDERER_FILE}"
 
-    # Если переменная пуста или файл не существует, ничего не добавляем
-    if [ -z "$patch_file" ] || [ ! -f "$patch_file" ]; then
-      return
-    fi
+      # Если переменная пуста, ничего не делаем
+      if [ -z "$patch_file" ]; then
+          return
+      fi
 
-    # Делаем файл исполняемым
-    chmod +x "$patch_file"
+      # Если файл не существует — выводим ошибку
+      if [ ! -f "$patch_file" ]; then
+          log_error "Post-renderer файл '$patch_file' не найден"
+          return 1
+      fi
 
-    # Формируем опцию для Helm
-    echo "--post-renderer $patch_file"
+      # Делаем файл исполняемым
+      chmod +x "$patch_file"
+
+      # Формируем опцию для Helm
+      echo "--post-renderer $patch_file"
   }
 
   # deploy application
