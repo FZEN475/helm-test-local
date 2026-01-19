@@ -251,13 +251,12 @@
     [ -n "$post_renderer_opt" ] && log_info "--- using post-renderer: $post_renderer_opt"
 
     # Deploy
-    log_info "deploy: helm ${helm_opts} upgrade --install --atomic ${HELM_DEPLOY_ARGS} ${post_renderer_opt} ${environment_name} ${pkg}"
+    log_info "deploy: helm ${helm_opts} ${post_renderer_opt} upgrade --install --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${pkg}"
     # shellcheck disable=SC2086
-    helm ${helm_opts} upgrade \
+    helm ${helm_opts} ${post_renderer_opt} upgrade \
       --install \
       --atomic \
       ${HELM_DEPLOY_ARGS} \
-      ${post_renderer_opt} \
       ${environment_name} \
       ${pkg}
 
