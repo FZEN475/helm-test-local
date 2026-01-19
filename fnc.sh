@@ -189,20 +189,34 @@
     fi
   }
 
+  install_helm_plugins() {
+      for plugin in $PLUGINS; do
+          case "$plugin" in
+              *://*)
+                  # Это URL — проверять локально не нужно
+                  ;;
+              *)
+                  # Это локальный путь — проверяем, что директория существует
+                  if [ ! -d "$plugin" ]; then
+                    log_error "Incorrect path to plugin"
+                  fi
+                  ;;
+          esac
+
+          # Устанавливаем плагин через helm
+          helm plugin install "$plugin" || return 1
+      done
+  }
+
   # Generate Helm post-renderer option if patch script exists
   helm_post_renderer() {
-    local patch_file="${HELM_POST_RENDERER_FILE}"
+    local post_renderer_opt="${HELM_POST_RENDERER_FILE}"
 
-    if [ -z "$patch_file" ]; then
+    if [ -z "$post_renderer_opt" ]; then
         return 0  # ничего нет
     fi
 
-    if [ ! -f "$patch_file" ]; then
-        return 1  # файл не найден
-    fi
-
-    chmod +x "$patch_file"
-    echo "$patch_file"
+    echo "$post_renderer_opt"
   }
 
   # deploy application
@@ -247,17 +261,13 @@
     fi
 
     patch_file=$(helm_post_renderer)
-    status=$?
-    if [ $status -eq 1 ]; then
-        log_error "Post-renderer файл '$HELM_POST_RENDERER_FILE' не найден"
-        exit 1
-    elif [ -n "$patch_file" ]; then
+
+    if [ -n "$patch_file" ]; then
         log_info "--- using post-renderer: $patch_file"
         post_renderer_opt="--post-renderer $patch_file"
     else
         post_renderer_opt=""
     fi
-
 
     # Deploy
     log_info "deploy: helm ${helm_opts} ${post_renderer_opt} upgrade --install --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${_pkg}"
