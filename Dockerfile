@@ -1,4 +1,4 @@
-FROM docker.io/alpine/helm:3.19 AS helm
+FROM docker.io/alpine/helm:4 AS helm
 
 RUN apk add --no-cache \
     curl~=8.14 \
