@@ -210,7 +210,7 @@
 
   # Generate Helm post-renderer option if patch script exists
   helm_post_renderer() {
-    local post_renderer_opt="${HELM_POST_RENDERER_FILE}"
+    local post_renderer_opt="${HELM_POST_RENDERER_PLUGIN}"
 
     if [ -z "$post_renderer_opt" ]; then
         return 0  # ничего нет
@@ -269,11 +269,16 @@
         post_renderer_opt=""
     fi
 
+    if [ "${CRD_INSTALL}" = "true" ]; then
+      HELM_CMD="install"
+    else
+      HELM_CMD="upgrade --install"
+    fi
+
     # Deploy
     log_info "deploy: helm ${helm_opts} ${post_renderer_opt} upgrade --install --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${_pkg}"
     # shellcheck disable=SC2086
-    helm ${helm_opts} ${post_renderer_opt} upgrade \
-      --install \
+    helm ${helm_opts} ${post_renderer_opt} ${HELM_CMD} \
       --atomic \
       ${HELM_DEPLOY_ARGS} \
       "${environment_name}" \
