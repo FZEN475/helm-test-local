@@ -276,7 +276,7 @@
     fi
 
     # Deploy
-    log_info "deploy: helm ${helm_opts} ${post_renderer_opt} upgrade --install --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${_pkg}"
+    log_info "deploy: helm ${helm_opts} ${post_renderer_opt} ${HELM_CMD} --atomic ${HELM_DEPLOY_ARGS}  ${environment_name} ${_pkg}"
     # shellcheck disable=SC2086
     helm ${helm_opts} ${post_renderer_opt} ${HELM_CMD} \
       --atomic \
